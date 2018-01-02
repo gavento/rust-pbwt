@@ -1,0 +1,9 @@
+[package]
+name = "pbwt"
+version = "0.1.0"
+authors = ["Tomas Gavenciak <gavento@ucw.cz>"]
+
+[dependencies]
+itertools = "*"
+serde_derive = "*"
+serde = "*"
