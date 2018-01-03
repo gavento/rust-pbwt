@@ -186,6 +186,7 @@ impl Index<usize> for BitVec {
     }
 }
 
+
 impl FromIterator<bool> for BitVec {
     fn from_iter<T: IntoIterator<Item = bool>>(iter: T) -> Self {
         let mut bv = BitVec::new();
@@ -196,6 +197,17 @@ impl FromIterator<bool> for BitVec {
     }
 }
 
+
+impl<'a, TV: 'static + Default + Eq> FromIterator<&'a TV> for BitVec {
+    fn from_iter<T: IntoIterator<Item = &'a TV>>(iter: T) -> Self {
+        let mut bv = BitVec::new();
+        for i in iter {
+            bv.push(*i != TV::default());
+        }
+        bv
+    }
+}
+/*
 impl<'a> FromIterator<&'a bool> for BitVec {
     fn from_iter<T: IntoIterator<Item = &'a bool>>(iter: T) -> Self {
         let mut bv = BitVec::new();
@@ -205,6 +217,7 @@ impl<'a> FromIterator<&'a bool> for BitVec {
         bv
     }
 }
+*/
 
 #[derive(Clone, Debug)]
 pub struct BitVecIter<'a> {
@@ -233,15 +246,14 @@ impl<'a> Iterator for BitVecIter<'a> {
     }
 }
 
-#[allow(unused_macros)]
-macro_rules! assert_panics {
-    ($b:expr) => {
-        let res = ::std::panic::catch_unwind(|| { $b });
-        if !res.is_err() {
-            panic!{"assertion failed: expression was expected to panic: {}",
-                stringify!($b)}
-        }        
-    };
+#[macro_export]
+macro_rules! bit_vec {
+    () => { BitVec::new() };
+    ($($x:expr),*) => { {
+        let bv: BitVec = ::std::iter::FromIterator::from_iter(&[$($x),*]);
+        bv
+    } };
+    ($($x:expr,)*) => { bit_vec![$($x),*] };
 }
 
 #[cfg(test)]
@@ -304,8 +316,24 @@ mod tests {
 
     #[test]
     fn test_bounds() {
-        let mut v = BitVec::repeated(162, true);
+        let v = BitVec::repeated(162, true);
         assert_panics!( v.get(162) );
         assert!(v.try_get(162).is_none());
+        assert_panics!( { BitVec::repeated(162, true).set(162, false); } );
     }
+
+    #[test]
+    fn test_macros() {
+        let va = bit_vec![false, true, false, false];
+        let va2 = bit_vec![false, true, false, false, ];
+        let vb = bit_vec![0, 1, 0, 0];
+        let vb2 = bit_vec![0, 1, 0, 0, ];
+        assert_eq!(va, vb);
+        assert_eq!(va, va2);
+        assert_eq!(vb, vb2);
+        assert_eq!(va.len(), 4);
+        assert_eq!(va[0], false);
+        let vc = bit_vec![];
+        assert_eq!(vc.len(), 0);
+    }    
 }
