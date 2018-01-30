@@ -1,8 +1,7 @@
 use std::cmp::max;
 use super::BitVec;
 use std::iter::FromIterator;
-
-pub type Range = ::std::ops::Range<usize>;
+use ::std::ops::Range;
 
 /// [1] Richard Durbin: 
 /// Efficient haplotype matching and storage using the positional
@@ -98,12 +97,12 @@ impl PBWTState {
         }
     }
 
-    pub fn extend_split(&self, r: &Range) -> [Range; 2] {
+    pub fn extend_split(&self, r: &Range<usize>) -> [Range<usize>; 2] {
         [self.extend_with(r, false), self.extend_with(r, true)]
     }
 
     #[inline]
-    pub fn extend_with(&self, r: &Range, val: bool) -> Range {
+    pub fn extend_with(&self, r: &Range<usize>, val: bool) -> Range<usize> {
         self.extend_single_with(r.start, val) ..
             self.extend_single_with(r.end, val)
     }
@@ -141,6 +140,37 @@ impl PBWTState {
     }
     */
 }
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct PBWTCursor {
+    pub range: ::std::ops::Range<usize>,
+    // Not working yet:
+    //pub match_start: usize,
+}
+
+impl PBWTCursor {
+    pub fn new_full_range(state: &PBWTState) -> Self {
+        PBWTCursor {
+            range: 0..state.m,
+        }
+    }
+
+    pub fn extend_both(&self, state: &PBWTState) -> [Self; 2] {
+        [self.extend_with(state, false), self.extend_with(state, true)]
+    }
+
+    pub fn extend_with(&self, state: &PBWTState, val: bool) -> Self {
+        PBWTCursor {
+            range: state.extend_single_with(self.range.start, val) .. 
+                   state.extend_single_with(self.range.end, val),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.range.len()
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

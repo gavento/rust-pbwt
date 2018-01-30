@@ -25,5 +25,6 @@ mod bitvec;
 mod pbwt;
 
 pub use bitvec::BitVec;
+pub use pbwt::{PBWTState, PBWTCursor};
 
 
