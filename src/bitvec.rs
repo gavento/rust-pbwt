@@ -96,7 +96,8 @@ impl BitVec {
     /// Return a iterator ove the bits
     pub fn iter<'a>(&'a self) -> BitVecIter<'a> {
         BitVecIter {
-            offset: 0,
+            beg: 0,
+            end: self.len(),
             bitvec: self,
         }
     }
@@ -186,7 +187,6 @@ impl Index<usize> for BitVec {
     }
 }
 
-
 impl FromIterator<bool> for BitVec {
     fn from_iter<T: IntoIterator<Item = bool>>(iter: T) -> Self {
         let mut bv = BitVec::new();
@@ -196,7 +196,6 @@ impl FromIterator<bool> for BitVec {
         bv
     }
 }
-
 
 impl<'a, TV: 'static + Default + Eq> FromIterator<&'a TV> for BitVec {
     fn from_iter<T: IntoIterator<Item = &'a TV>>(iter: T) -> Self {
@@ -221,28 +220,51 @@ impl<'a> FromIterator<&'a bool> for BitVec {
 
 #[derive(Clone, Debug)]
 pub struct BitVecIter<'a> {
-    offset: usize,
+    /// Index of first range element
+    beg: usize,
+    /// Index of position after last range element
+    end: usize,
+    /// Referenced `BitVec`
     bitvec: &'a BitVec,
 }
 
 impl<'a> Iterator for BitVecIter<'a> {
     type Item = bool;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.offset >= self.bitvec.len {
+        if self.beg >= self.end {
             None
         } else {
-            self.offset += 1;
-            Some(self.bitvec.get(self.offset - 1))
+            self.beg += 1;
+            Some(self.bitvec.get(self.beg - 1))
         }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let rem = self.bitvec.len - self.offset;
+        let rem = self.end - self.beg;
         (rem, Some(rem))
     }
 
     fn count(self) -> usize {
         return self.size_hint().0;
+    }
+}
+
+impl<'a> DoubleEndedIterator for BitVecIter<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.beg >= self.end {
+            None
+        } else {
+            self.end -= 1;
+            Some(self.bitvec.get(self.end))
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a BitVec {
+    type Item = bool;
+    type IntoIter = BitVecIter<'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
@@ -336,4 +358,13 @@ mod tests {
         let vc = bit_vec![];
         assert_eq!(vc.len(), 0);
     }    
+
+    #[test]
+    fn test_rev() {
+        let va = bit_vec![1, 1, 0, 0, 0];
+        let vr = bit_vec![0, 0, 0, 1, 1];
+        assert_eq!(va.iter().collect::<Vec<_>>(),
+                   vr.iter().rev().collect::<Vec<_>>());
+        assert!(&va.iter().rev().eq(&vr));
+    }
 }
