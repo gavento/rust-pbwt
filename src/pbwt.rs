@@ -1,4 +1,4 @@
-use std::cmp::min;
+use std::cmp::max;
 use super::BitVec;
 use std::iter::FromIterator;
 
@@ -20,12 +20,13 @@ pub struct PBWTState {
     pub permutation: Vec<usize>,
     /// The next column, already permuted by `permutation`.
     next_col: Option<BitVec>,
-    /// Sum of ones in `next_bits` in `0..i` (not including `i`). Has length `N+1`.
+    /// Sum of ones in `next_bits` in `0..i` (not including `i`). Has length `m+1`.
     /// Only valid when `next_col.is_some()`.
     true_count: Vec<usize>,
-    /// Length of common suffix (match depth) of rows `i-1` and `i`.
-    /// Has length `n` and `true_count[0]=0`.
-    pub depths: Vec<usize>,
+    /// Start of the common suffix of rows `i-1` and `i` (under current permutation).
+    /// Called `d_k` in [1]. Has length `m` and `match_start[0]=position`.
+    pub match_start: Vec<usize>,
+
     // A static min-interval tree with the common suffix length of i and i+1 seq.
     // The first part is one smaller than length of `permutation`, the following parts
     // are the minimums of 2-tuples, 4-tuples, ... up to the entire tree min.
@@ -46,7 +47,7 @@ impl PBWTState {
             permutation: (0..m).collect(),
             next_col: None,
             true_count: Vec::new(),
-            depths: vec![0; m],
+            match_start: vec![0; m],
         }
         //s.common_max_tree.resize(s.permutation.len() - 1, 0);
         //s.compute_max_tree();
@@ -72,18 +73,18 @@ impl PBWTState {
         let next = self.next_col.as_ref().expect("next_col must be set.");
         assert_eq!(self.true_count.len(), self.m + 1);
         let mut perm = Vec::<usize>::with_capacity(self.m);
-        let mut depth = Vec::<usize>::with_capacity(self.m);
+        let mut match_start = Vec::<usize>::with_capacity(self.m);
         // First all zeros, then all ones
-        for val in [false, true].iter() {
+        for &val in &[false, true] {
             let mut d = self.position;
             let mut first = true;
             for (i, v) in next.iter().enumerate() {
-                d = min(d, self.depths[i]);
-                if v == *val {
+                d = max(d, self.match_start[i]);
+                if v == val {
                     perm.push(self.permutation[i]);
-                    depth.push(if first { 0 } else { d + 1 });
+                    match_start.push(if first { self.position + 1 } else { d });
                     first = false;
-                    d = self.position;
+                    d = 0;
                 }
             }
         }
@@ -93,7 +94,7 @@ impl PBWTState {
             permutation: perm,
             next_col: None,
             true_count: Vec::new(),
-            depths: depth,
+            match_start: match_start,
         }
     }
 
@@ -148,10 +149,17 @@ mod tests {
 
     #[test]
     fn test_basic() {
+        // Not permuted input:
+        // 0 1
+        // 1 0
+        // 1 1
+        // 0 0
+        // 1 0
+        // 0 1
         let mut p = PBWTState::new(6);
         assert_eq!(p.m, 6);
         assert_eq!(p.next_col, None);
-        assert_eq!(p.depths, [0, 0, 0, 0, 0, 0]);
+        assert_eq!(p.match_start, [0, 0, 0, 0, 0, 0]);
 
         p.set_next_column(bit_vec![0,1,1,0,1,0]);
         assert_eq!(p.extend_with(&(2..5), false), 1..2);
@@ -161,12 +169,19 @@ mod tests {
         assert_eq!(p.extend_split(&(0..0)), [0..0, 3..3]);
         assert_eq!(p.extend_split(&(6..6)), [3..3, 6..6]);
         let mut p = p.advance();
-        assert_eq!(p.depths, [0, 1, 1, 0, 1, 1]);
+        assert_eq!(p.match_start, [1, 0, 0, 1, 0, 0]);
 
         p.set_next_column(bit_vec![1,0,1,0,0,1]);
         assert_eq!(p.extend_split(&(1..5)), [0..2, 4..6]);
         let p = p.advance();
-        assert_eq!(p.depths, [0, 1, 2, 0, 2, 1]);
+        // Sorted at this point:
+        // 3. 0 0
+        // 1. 1 0
+        // 4. 1 0
+        // 0. 0 1
+        // 5. 0 1
+        // 2. 1 1
+        assert_eq!(p.match_start, [2, 1, 0, 2, 0, 1]);
         assert_eq!(p.permutation, [3, 1, 4, 0, 5, 2]);
         assert_eq!(p.position, 2);
     }
