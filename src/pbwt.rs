@@ -4,23 +4,27 @@ use std::iter::FromIterator;
 
 pub type Range = ::std::ops::Range<usize>;
 
+/// [1] Richard Durbin: 
+/// Efficient haplotype matching and storage using the positional
+/// Burrows–Wheeler transform (PBWT)
+
 #[derive(Clone, Debug)]
-pub struct PBWTState<L=usize> {
-    /// Number of rows.
-    pub n: usize,
-    /// Row labels. Just cosmetic, may be any type.
-    pub labels: Vec<L>,
+pub struct PBWTState {
+    /// Number of rows. Matches `M` in [1].
+    pub m: usize,
     /// The number of columns already traversed.
+    /// Called `k` in [1].
     pub position: usize,
     /// The current permutaton of the rows.
+    /// Called `a_k` in [1].
     pub permutation: Vec<usize>,
-    /// The next column, permuted by `permutation`.
+    /// The next column, already permuted by `permutation`.
     next_col: Option<BitVec>,
     /// Sum of ones in `next_bits` in `0..i` (not including `i`). Has length `N+1`.
-    /// Only valid when `next_bits.is_some()`.
+    /// Only valid when `next_col.is_some()`.
     true_count: Vec<usize>,
     /// Length of common suffix (match depth) of rows `i-1` and `i`.
-    /// Has length `N` and `true_count[0]=0`.
+    /// Has length `n` and `true_count[0]=0`.
     pub depths: Vec<usize>,
     // A static min-interval tree with the common suffix length of i and i+1 seq.
     // The first part is one smaller than length of `permutation`, the following parts
@@ -33,26 +37,16 @@ pub struct PBWTState<L=usize> {
 }
 
 #[allow(dead_code)]
-impl PBWTState<usize> {
-    pub fn new(n: usize) -> Self {
-        Self::with_labels((0..n).collect::<Vec<_>>())
-    }
-}
-
-#[allow(dead_code)]
-impl<L> PBWTState<L> {
-    pub fn with_labels<T: Into<Vec<L>>>(labels: T) -> Self {
-        let l: Vec<L> = labels.into();
-        let n = l.len();
-        assert!(n > 0);
+impl PBWTState {
+    pub fn new(m: usize) -> Self {
+        assert!(m > 0);
         PBWTState {
-            n: n,
-            labels: l,
+            m: m,
             position: 0,
-            permutation: (0..n).collect(),
+            permutation: (0..m).collect(),
             next_col: None,
-            true_count: vec![0; n + 1],
-            depths: vec![0; n],
+            true_count: Vec::new(),
+            depths: vec![0; m],
         }
         //s.common_max_tree.resize(s.permutation.len() - 1, 0);
         //s.compute_max_tree();
@@ -62,8 +56,8 @@ impl<L> PBWTState<L> {
     /// Sets the next column. The current `next_col` must be `None`.
     pub fn set_next_column(&mut self, next_col: BitVec) {
         assert!(self.next_col.is_none());
-        assert_eq!(self.n, next_col.len());
-        let next = BitVec::from_iter((0..self.n).map(
+        assert_eq!(self.m, next_col.len());
+        let next = BitVec::from_iter((0..self.m).map(
             |i| next_col.get(self.permutation[i])));
         self.true_count.truncate(0);
         self.true_count.push(0);
@@ -72,12 +66,13 @@ impl<L> PBWTState<L> {
         self.next_col = Some(next);
     }
 
-    /// Advance the internal state over the `next_col`, consuming it.
-    /// Panics when `next_col` is `None`.
-    pub fn advance(&mut self) {
-        let next = self.next_col.take().expect("next_col must be set.");
-        let mut perm = Vec::<usize>::with_capacity(self.n);
-        let mut depth = Vec::<usize>::with_capacity(self.n);
+    /// Advance the internal state over the `next_col`.
+    /// Returns a new structure. Panics when `next_col` is `None`.
+    pub fn advance(&self) -> Self {
+        let next = self.next_col.as_ref().expect("next_col must be set.");
+        assert_eq!(self.true_count.len(), self.m + 1);
+        let mut perm = Vec::<usize>::with_capacity(self.m);
+        let mut depth = Vec::<usize>::with_capacity(self.m);
         // First all zeros, then all ones
         for val in [false, true].iter() {
             let mut d = self.position;
@@ -92,9 +87,14 @@ impl<L> PBWTState<L> {
                 }
             }
         }
-        self.permutation = perm;
-        self.depths = depth;
-        self.position += 1;
+        PBWTState {
+            m: self.m,
+            position: self.position + 1,
+            permutation: perm,
+            next_col: None,
+            true_count: Vec::new(),
+            depths: depth,
+        }
     }
 
     pub fn extend_split(&self, r: &Range) -> [Range; 2] {
@@ -111,7 +111,7 @@ impl<L> PBWTState<L> {
     pub fn extend_single_with(&self, i: usize, val: bool) -> usize {
         assert!(self.next_col.is_some());
         if val {
-            self.n - self.true_count[self.n] + self.true_count[i]
+            self.m - self.true_count[self.m] + self.true_count[i]
         } else {
             i - self.true_count[i]
         }
@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn test_basic() {
         let mut p = PBWTState::new(6);
-        assert_eq!(p.n, 6);
+        assert_eq!(p.m, 6);
         assert_eq!(p.next_col, None);
         assert_eq!(p.depths, [0, 0, 0, 0, 0, 0]);
 
@@ -160,12 +160,12 @@ mod tests {
         assert_eq!(p.extend_split(&(0..6)), [0..3, 3..6]);
         assert_eq!(p.extend_split(&(0..0)), [0..0, 3..3]);
         assert_eq!(p.extend_split(&(6..6)), [3..3, 6..6]);
-        p.advance();
+        let mut p = p.advance();
         assert_eq!(p.depths, [0, 1, 1, 0, 1, 1]);
 
         p.set_next_column(bit_vec![1,0,1,0,0,1]);
         assert_eq!(p.extend_split(&(1..5)), [0..2, 4..6]);
-        p.advance();
+        let p = p.advance();
         assert_eq!(p.depths, [0, 1, 2, 0, 2, 1]);
         assert_eq!(p.permutation, [3, 1, 4, 0, 5, 2]);
         assert_eq!(p.position, 2);
