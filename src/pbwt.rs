@@ -1,7 +1,5 @@
-use std::cmp::max;
 use super::BitVec;
-use std::iter::FromIterator;
-use ::std::ops::Range;
+use std::{ops::Range, cmp::max, iter::FromIterator, mem::size_of};
 
 /// [1] Richard Durbin: 
 /// Efficient haplotype matching and storage using the positional
@@ -9,48 +7,51 @@ use ::std::ops::Range;
 
 #[derive(Clone, Debug)]
 pub struct PBWTState {
+
     /// Number of rows. Matches `M` in [1].
     pub m: usize,
+
     /// The number of columns already traversed.
     /// Called `k` in [1].
     pub position: usize,
+
     /// The current permutaton of the rows.
     /// Called `a_k` in [1].
     pub permutation: Vec<usize>,
+
     /// The next column, already permuted by `permutation`.
     next_col: Option<BitVec>,
+
     /// Sum of ones in `next_bits` in `0..i` (not including `i`). Has length `m+1`.
     /// Only valid when `next_col.is_some()`.
     true_count: Vec<usize>,
-    /// Start of the common suffix of rows `i-1` and `i` (under current permutation).
+
+    /// Start of the common suffix of rows `i-1` and `i` (under the current permutation).
     /// Called `d_k` in [1]. Has length `m` and `match_start[0]=position`.
     pub match_start: Vec<usize>,
-
-    // A static min-interval tree with the common suffix length of i and i+1 seq.
-    // The first part is one smaller than length of `permutation`, the following parts
-    // are the minimums of 2-tuples, 4-tuples, ... up to the entire tree min.
-    // (Incomplete tuples are also minimized over.)
-    //common_max_tree: Vec<Index>,
-    // Indexes into `max_tree` with starts of windows of size 1, 2, 4, 8, ...
-    // up to the entire tree.
-    //max_tree_starts: Vec<usize>,
+    
+    /// Maxima interval tree for `match_start`. 
+    /// `match_start_maxima[l][k]` contains the maximum of
+    /// `match_start[(2 << l) * k .. (2 << l) * (k + 1) - 1]`.
+    pub match_start_maxima: Vec<Vec<usize>>,
 }
 
 #[allow(dead_code)]
 impl PBWTState {
     pub fn new(m: usize) -> Self {
         assert!(m > 0);
-        PBWTState {
+        let l = 1 + 8 * size_of::<usize>() - (m.leading_zeros() as usize);
+        let mut s = PBWTState {
             m: m,
             position: 0,
             permutation: (0..m).collect(),
             next_col: None,
             true_count: Vec::new(),
             match_start: vec![0; m],
-        }
-        //s.common_max_tree.resize(s.permutation.len() - 1, 0);
-        //s.compute_max_tree();
-        //s
+            match_start_maxima: vec![Vec::new(); l],
+        };
+        s.compute_max_tree();
+        s
     }
 
     /// Sets the next column. The current `next_col` must be `None`.
@@ -87,14 +88,17 @@ impl PBWTState {
                 }
             }
         }
-        PBWTState {
+        let mut s = PBWTState {
             m: self.m,
             position: self.position + 1,
             permutation: perm,
             next_col: None,
             true_count: Vec::new(),
             match_start: match_start,
-        }
+            match_start_maxima: vec![Vec::new(); self.match_start_maxima.len()],
+        };
+        s.compute_max_tree();
+        s
     }
 
     pub fn extend_split(&self, r: &Range<usize>) -> [Range<usize>; 2] {
@@ -117,28 +121,48 @@ impl PBWTState {
         }
     }
 
-/*
+    /// Computes the max-tree in `match_start_maxima` for as many
+    /// levels as `match_start_maxima` already has (NOP if it is empty).
     fn compute_max_tree(&mut self) {
-        self.common_max_tree.truncate(self.len() - 1);
-        self.max_tree_starts.clear();
-        self.max_tree_starts.push(0);
-        let mut wlen = 1;
-        while wlen < self.len() {
-            wlen *= 2;
-            let start = *self.max_tree_starts.last().unwrap();
-            let stop = self.common_max_tree.len();
-            self.max_tree_starts.push(stop);
-            for i in 0 .. (stop - start) / 2 {
-                self.common_max_tree.push(min(
-                    self.common_max_tree[start + 2 * i],
-                    self.common_max_tree[start + 2 * i + 1]));
+        let l = self.match_start_maxima.len();
+        self.match_start_maxima.clear();
+        for d in 0 .. l {
+            let mut ms = Vec::with_capacity(3 + (self.m >> (d + 1)));
+            {
+                let up = if d == 0 {
+                    &self.match_start
+                } else {
+                    &self.match_start_maxima.last().unwrap()
+                };
+                for i in 0 .. (up.len() + 1) / 2 {
+                    ms.push(max(up[2 * i], up[2 * i + 1]));
+                }
             }
-            if (stop - start) % 2 != 0 {
-                self.common_max_tree.push(self.common_max_tree[stop - 1]);
-            }
+            self.match_start_maxima.push(ms);
         }
     }
-    */
+
+    /// Return a (closed..open) range around `around_pos` that has match start <= `match_start`.
+    /// A slow, linear-time version.
+    fn match_start_range_slow(&mut self, match_start: usize, around_pos: usize) -> PBWTCursor {
+        let mut a = around_pos;
+        while a > 0 && self.match_start[a] <= match_start {
+            a -= 1;
+        }
+        let mut b = around_pos + 1;
+        while b < self.m && self.match_start[b] <= match_start {
+            b += 1;
+        }
+        PBWTCursor {
+            range: a .. b,
+        }
+    }
+
+    /// Return a (closed..open) range around `around_pos` that has match start <= `match_start`.
+    pub fn match_start_range(&mut self, match_start: usize, around_pos: usize) -> PBWTCursor {
+        // TODO: log-time solution
+        self.match_start_range_slow(match_start, around_pos)
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
