@@ -144,7 +144,7 @@ impl PBWTState {
 
     /// Return a (closed..open) range around `around_pos` that has match start <= `match_start`.
     /// A slow, linear-time version.
-    fn match_start_range_slow(&mut self, match_start: usize, around_pos: usize) -> PBWTCursor {
+    fn match_start_range_slow(&self, match_start: usize, around_pos: usize) -> PBWTCursor {
         let mut a = around_pos;
         while a > 0 && self.match_start[a] <= match_start {
             a -= 1;
@@ -159,7 +159,7 @@ impl PBWTState {
     }
 
     /// Return a (closed..open) range around `around_pos` that has match start <= `match_start`.
-    pub fn match_start_range(&mut self, match_start: usize, around_pos: usize) -> PBWTCursor {
+    pub fn match_start_range(&self, match_start: usize, around_pos: usize) -> PBWTCursor {
         // TODO: log-time solution
         self.match_start_range_slow(match_start, around_pos)
     }
